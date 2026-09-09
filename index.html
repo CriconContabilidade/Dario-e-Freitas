@@ -602,8 +602,12 @@ function downloadBaixaTxt(prefix, filename){
   const naoValidas = incluidas.filter(r=>!classifyDocumento(r.cnpj).valido);
   if(naoValidas.length && !confirm(`${naoValidas.length} linha(s) com CNPJ/CPF ausente ou inválido. Gerar mesmo assim?`)) return;
   const lines = incluidas.map(r=>{
-    const arr = [r.numero, onlyDigits(r.cnpj), fmtDateBR(r.vencimento), fmtDateBR(r.databaixa), r.valor, r.juros, r.multa, r.desconto];
-    return arr.map((v,i)=> i>=4 ? fmtValorTxt(v) : v).join(";");
+    const base = [r.numero, onlyDigits(r.cnpj), fmtDateBR(r.vencimento), fmtDateBR(r.databaixa), r.valor, r.juros, r.multa, r.desconto];
+    // Série do Documento — coluna exigida pelo Domínio só na baixa de serviços, logo após
+    // o Número da Nota; é sempre "U", não varia por cliente/nota.
+    const arr = prefix==="ser" ? [base[0], "U", ...base.slice(1)] : base;
+    const numStart = prefix==="ser" ? 5 : 4;
+    return arr.map((v,i)=> i>=numStart ? fmtValorTxt(v) : v).join(";");
   });
   downloadText(filename, lines.join("\r\n")+"\r\n");
 }
