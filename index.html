@@ -304,9 +304,15 @@ async function parseExtratoSicoob(file){
   const anoRef = pm ? parseInt(pm[2].slice(-4)) : (new Date()).getFullYear();
   const mesFim = pm ? parseInt(pm[2].slice(3,5)) : 12;
 
-  const movimentos = [], rdc = [];
+  const movimentos = [], rdc = [], tarifas = [];
   let atual = null, parou = false;
-  const guardaRdc = a=>{ if(a && a._ignorar && /^(RDC AUTOM|RESGATE RDC)/.test(normalizeText(a.historico))) rdc.push({data:a.data, historico:a.historico, detalhe:"", valor:a.valor, direcao:a.direcao}); };
+  // RDC/resgate e tarifas ficam fora da baixa/pendências, mas entram como lançamento contábil.
+  const guardaRdc = a=>{
+    if(!a || !a._ignorar) return;
+    const h = normalizeText(a.historico), item = {data:a.data, historico:a.historico, detalhe:a.detalheLinhas.join(" | "), valor:a.valor, direcao:a.direcao};
+    if(/^(RDC AUTOM|RESGATE RDC)/.test(h)) rdc.push({...item, detalhe:""});
+    else if(/^(TARIFA COBRAN|DEB PACOTE SERVI)/.test(h)) tarifas.push(item);
+  };
   allLines.forEach(rawLine=>{
     const line = rawLine.trim();
     if(!line || parou) return;
@@ -332,7 +338,7 @@ async function parseExtratoSicoob(file){
     if(atual && !/^DATA HIST/i.test(line)) atual.detalheLinhas.push(line);
   });
   if(atual && !atual._ignorar) movimentos.push(atual); else guardaRdc(atual);
-  movimentos.rdc = rdc;
+  movimentos.rdc = rdc; movimentos.tarifas = tarifas;
   movimentos.forEach(m=>{ m.detalhe = m.detalheLinhas.join(" | "); delete m.detalheLinhas; delete m._ignorar; });
   return movimentos;
 }
@@ -524,7 +530,7 @@ function processarExtrato(){
   lastResult = {baixaEntradas, baixaServicos, cruzamentos, ambiguos, novos};
   // O que a baixa de nota fiscal não cobriu vira lançamento contábil (padrões cadastrados
   // preenchem a contrapartida; o resto fica em branco pra completar/cadastrar padrão).
-  lancExtrato = montarLancExtrato(sobra).concat(montarLancRdc(extratoMovs.rdc||[])).sort((a,b)=>partsToDate(a.mov.data)-partsToDate(b.mov.data));
+  lancExtrato = montarLancExtrato(sobra).concat(montarLancExtrato((extratoMovs.tarifas||[]).map(mov=>({mov}))), montarLancRdc(extratoMovs.rdc||[])).sort((a,b)=>partsToDate(a.mov.data)-partsToDate(b.mov.data));
   renderResult();
 }
 
