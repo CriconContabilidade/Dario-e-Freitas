@@ -77,6 +77,8 @@ input[type=file]{display:none;}
 
 table.preview{width:100%;border-collapse:collapse;font-size:12px;margin-top:8px;}
 table.preview th{text-align:left;padding:7px 8px;border-bottom:1.5px solid var(--rule-strong);font-family:'IBM Plex Mono',monospace;font-size:10px;text-transform:uppercase;letter-spacing:.03em;color:var(--ink-soft);position:sticky;top:0;background:var(--paper-raised);white-space:nowrap;}
+table.preview th{cursor:pointer;user-select:none;}
+table.preview th:hover{color:var(--ink);}
 table.preview td{padding:6px 8px;border-bottom:1px solid var(--rule);vertical-align:top;}
 table.preview td.num{text-align:right;font-family:'IBM Plex Mono',monospace;white-space:nowrap;}
 table.preview tr.warn{background:var(--amber-bg);}
@@ -922,7 +924,51 @@ function renderLancExtrato(){
   box.innerHTML = h;
   [...box.querySelectorAll(".table-wrap")].forEach((w,k)=>{ if(wraps[k]){ w.scrollTop=wraps[k][0]; w.scrollLeft=wraps[k][1]; } });
   window.scrollTo(0, scrollY);
+  const t0 = box.querySelector("table.preview");
+  if(lancSort && t0){ t0.dataset.sortCol = lancSort.col; t0.dataset.sortDir = lancSort.dir; ordenarTabela(t0, lancSort.col, lancSort.dir); }
 }
+
+/* =========================================================================
+   ORDENAR COLUNAS clicando no título (qualquer tabela .preview). Ordena só as
+   linhas na tela; os handlers das linhas usam índice fixo, então continuam valendo.
+   ========================================================================= */
+var lancSort = null;   // {col, dir} da tabela de lançamentos do extrato (reaplicado a cada redesenho)
+function valorCelula(td){
+  const inp = td.querySelector("input,select");
+  if(inp){ if(inp.type==="checkbox") return inp.checked ? 1 : 0; return inp.value; }
+  return td.textContent.trim();
+}
+function chaveOrdem(txt){
+  if(typeof txt==="number") return txt;
+  const t = String(txt).trim();
+  const d = t.match(/^(\d{2})\/(\d{2})\/(\d{4})/);
+  if(d) return +(d[3]+d[2]+d[1]);
+  if(/^-?[\d.]*\d,\d{2}(\s*[CD])?$/.test(t)) return parseBRL(t.replace(/\s*[CD]$/,""));
+  if(/^-?\d+$/.test(t)) return +t;
+  return normalizeText(t);
+}
+function ordenarTabela(table, col, dir){
+  const tbody = table.tBodies[0]; if(!tbody) return;
+  const rows = [...tbody.rows];
+  if(rows.length<2 || rows.some(r=>r.cells.length<=col)) return;
+  const k = rows.map(r=>chaveOrdem(valorCelula(r.cells[col])));
+  const idx = rows.map((_,i)=>i).sort((a,b)=>{
+    const x=k[a], y=k[b];
+    const c = (typeof x==="number" && typeof y==="number") ? x-y : String(x).localeCompare(String(y),"pt-BR");
+    return (dir==="desc" ? -c : c) || (a-b);
+  });
+  idx.forEach(i=>tbody.appendChild(rows[i]));
+  [...table.tHead.rows[0].cells].forEach((th,j)=>{ th.textContent = th.textContent.replace(/\s*[▲▼]$/,""); if(j===col) th.textContent += dir==="desc" ? " ▼" : " ▲"; });
+}
+document.addEventListener("click", e=>{
+  const th = e.target.closest && e.target.closest("table.preview th"); if(!th) return;
+  const table = th.closest("table"), col = th.cellIndex;
+  const atual = table.dataset.sortCol===String(col) ? table.dataset.sortDir : null;
+  const dir = atual==="asc" ? "desc" : "asc";
+  table.dataset.sortCol = col; table.dataset.sortDir = dir;
+  ordenarTabela(table, col, dir);
+  if(table.closest("#lancExtratoBox") && table === document.querySelector("#lancExtratoBox table.preview")) lancSort = {col, dir};
+});
 
 window.renderPendenciasAbertas = renderPendenciasAbertas;
 window.renderClientesCount = renderClientesCount;
