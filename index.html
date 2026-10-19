@@ -753,7 +753,12 @@ var padroesLanc = [], lancExtrato = [];
 try{ padroesLanc = JSON.parse(localStorage.getItem(PADROES_LS)||"[]"); }catch(e){ padroesLanc = []; }
 function lsGet(k){ try{ return localStorage.getItem(k)||""; }catch(e){ return ""; } }
 function lsSet(k,v){ try{ localStorage.setItem(k,v); }catch(e){} }
-function savePadroes(){ lsSet(PADROES_LS, JSON.stringify(padroesLanc)); }
+function savePadroes(){
+  lsSet(PADROES_LS, JSON.stringify(padroesLanc));
+  // Também na nuvem (campo do documento da empresa), pra não depender do navegador.
+  if(window.padroesCloud) window.padroesCloud.salvar(padroesLanc).catch(e=>{ console.error("padroes",e); alert("Padrão salvo só neste navegador — não consegui gravar na nuvem: "+e.message); });
+  else console.warn("Nuvem ainda não conectada: padrões salvos só neste navegador.");
+}
 function escHtml(s){ return String(s??"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
 
 const DETALHE_GENERICO = /^(pagamento pix|recebimento pix|transfer[eê]ncia pix|doc\.?:|internet$|telefone$)/i;
@@ -1047,6 +1052,17 @@ onAuthStateChanged(auth, (user)=>{
   onSnapshot(empresaRef, (snap)=>{
     window.pendenciasDB = (snap.exists() && snap.data().pendencias_advocacia) || [];
     if(window.renderPendenciasAbertas) window.renderPendenciasAbertas();
+    // Padrões de lançamento: a nuvem manda; se ainda não existe lá, sobe o que já está neste navegador.
+    if(!snap.metadata.hasPendingWrites){
+      const cloud = snap.exists() ? snap.data().padroes_lancamentos : undefined;
+      if(Array.isArray(cloud)){
+        window.padroesLanc = cloud;
+        try{ localStorage.setItem("dario_padroes_lanc_v1", JSON.stringify(cloud)); }catch(e){}
+        if(window.reaplicarPadroes) window.reaplicarPadroes();
+      } else if((window.padroesLanc||[]).length){
+        window.padroesCloud.salvar(window.padroesLanc).catch(e=>console.error("migrar padroes",e));
+      }
+    }
   }, err=>{ console.error("empresa onSnapshot", err); });
 });
 
@@ -1069,6 +1085,9 @@ function nextPendId(arr, jaUsados){
   const ids = arr.map(p=>p.id||0).concat(jaUsados);
   return ids.length ? Math.max(...ids)+1 : 1;
 }
+window.padroesCloud = {
+  async salvar(arr){ await setDoc(empresaRef, { padroes_lancamentos: JSON.parse(JSON.stringify(arr)) }, { merge: true }); },
+};
 window.pendenciasCloud = {
   // Aplica TODAS as resoluções e TODAS as pendências novas dessa rodada num
   // único setDoc -- evita perder mudanças por leitura desatualizada quando
