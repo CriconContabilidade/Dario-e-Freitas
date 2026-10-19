@@ -836,20 +836,43 @@ function atualizarResumoLanc(){
   set("lancResPend", lancExtrato.filter(r=>!r.ignorado && (!r.debito || !r.credito)).length);
 }
 function cadastrarPadraoDe(i){
-  const r = lancExtrato[i], m = r.mov;
+  const m = lancExtrato[i].mov;
   const sug = detalheUtil(m)[0] || m.historico;
-  const kw = prompt("Palavra-chave que identifica esse tipo de lançamento (nome, CNPJ ou trecho do histórico).\nSepare várias por | :", sug);
-  if(!kw || !kw.trim()) return;
   const lado = m.direcao==="pago" ? "débito" : "crédito";
-  const conta = prompt(`Conta contábil da contrapartida (${lado}) pra "${kw.trim()}". Deixe vazio e OK pra IGNORAR esse tipo de linha:`, r.manual ? (m.direcao==="pago"?r.debito:r.credito) : "");
-  if(conta===null) return;
-  const hist = prompt("Histórico fixo (deixe vazio pra usar o texto do extrato):", "");
-  if(hist===null) return;
-  const soEssaDirecao = confirm(`Valer só para ${m.direcao==="pago"?"saídas (pagos)":"entradas (recebidos)"}?\nOK = só esta direção · Cancelar = qualquer direção`);
-  padroesLanc.push({keywords: kw.split("|").map(s=>s.trim()).filter(Boolean), direcao: soEssaDirecao?m.direcao:"", conta: conta.trim(), hist: hist.trim(), ignorar: !conta.trim()});
-  savePadroes();
-  lancExtrato.forEach(x=>{ x.manual = false; });  // reaplica em todas
-  reaplicarPadroes();
+  const old = document.getElementById("padModal"); if(old) old.remove();
+  const el = document.createElement("div");
+  el.id = "padModal";
+  el.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px;";
+  el.innerHTML = `<div style="background:var(--paper-raised,#fff);color:var(--ink,#000);border-radius:6px;padding:20px;max-width:520px;width:100%;box-shadow:0 8px 30px rgba(0,0,0,.3);">
+    <div class="section-title" style="margin-top:0">Cadastrar padrão</div>
+    <div class="help">Linha: ${fmtDateBR(m.data)} · ${fmtBRL(m.valor)} ${m.direcao==="pago"?"D":"C"} · ${escHtml(m.historico)}</div>
+    <div class="field"><label class="lbl">Palavra-chave (nome, CNPJ ou trecho — várias separadas por |)</label><input class="cell-input" id="padKw" value="${escHtml(sug)}"></div>
+    <div class="field" style="margin-top:10px"><label class="lbl">Conta contábil da contrapartida (${lado})</label><input class="cell-input" id="padConta"></div>
+    <div class="field" style="margin-top:10px"><label class="lbl">Histórico fixo (opcional — vazio usa o texto do extrato)</label><input class="cell-input" id="padHist"></div>
+    <div class="field" style="margin-top:10px"><label class="lbl">Vale para</label><select class="cell-input" id="padDir"><option value="${m.direcao}">só ${m.direcao==="pago"?"saídas":"entradas"}</option><option value="">entradas e saídas</option></select></div>
+    <label style="display:block;margin-top:10px;font-size:12.5px;"><input type="checkbox" id="padIgn"> Ignorar (essa linha não gera lançamento)</label>
+    <div id="padErro" class="status-line err"></div>
+    <div class="btn-row"><button class="btn" id="padSalvar">Salvar padrão</button><button class="btn ghost" id="padCancelar">Cancelar</button></div></div>`;
+  document.body.appendChild(el);
+  const fechar = ()=>el.remove();
+  el.addEventListener("click", e=>{ if(e.target===el) fechar(); });
+  document.getElementById("padCancelar").onclick = fechar;
+  document.getElementById("padSalvar").onclick = ()=>{
+    const kws = document.getElementById("padKw").value.split("|").map(x=>x.trim()).filter(Boolean);
+    const conta = document.getElementById("padConta").value.trim();
+    const ign = document.getElementById("padIgn").checked;
+    const erro = document.getElementById("padErro");
+    if(!kws.length){ erro.textContent = "Informe a palavra-chave."; return; }
+    if(!conta && !ign){ erro.textContent = "Informe a conta da contrapartida (ou marque Ignorar)."; return; }
+    padroesLanc.push({keywords:kws, direcao:document.getElementById("padDir").value, conta, hist:document.getElementById("padHist").value.trim(), ignorar:ign});
+    savePadroes();
+    fechar();
+    lancExtrato.forEach(x=>{ x.manual = false; });
+    reaplicarPadroes();
+    const casadas = lancExtrato.filter(x=>x.padrao===padroesLanc.length-1).length;
+    alert(`Padrão salvo (${padroesLanc.length} no total). Aplicado em ${casadas} linha(s) deste extrato.`);
+  };
+  document.getElementById("padKw").focus();
 }
 function removerPadrao(i){ if(!confirm("Remover este padrão?")) return; padroesLanc.splice(i,1); savePadroes(); lancExtrato.forEach(x=>{x.manual=false;}); reaplicarPadroes(); }
 function editarPadrao(i, campo, val){
