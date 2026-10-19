@@ -57,6 +57,8 @@ input[type=file]{display:none;}
 .btn.ghost:hover{background:rgba(0,0,0,0.06);}
 .btn.small{padding:5px 10px;font-size:12px;}
 .btn:disabled{opacity:.35;cursor:not-allowed;}
+.lbl{display:block;font-size:11.5px;font-weight:600;color:var(--ink-soft);margin-bottom:3px;}
+.field .cell-input{border-color:var(--rule-strong);background:var(--paper-raised);padding:6px 8px;}
 .btn-row{display:flex;gap:10px;flex-wrap:wrap;margin-top:14px;}
 
 .status-line{font-family:'IBM Plex Mono',monospace;font-size:12.5px;color:var(--ink-soft);margin-top:10px;white-space:pre-wrap;}
@@ -125,6 +127,32 @@ code{background:var(--paper);padding:1px 5px;border-radius:3px;font-family:'IBM 
     <div class="table-wrap"><table class="preview">
       <thead><tr><th>Tipo</th><th>Direção</th><th>Data</th><th>Valor</th><th>Descrição</th><th>Dias em aberto</th></tr></thead>
       <tbody id="pendenciasAbertasBody"></tbody>
+    </table></div>
+  </div>
+
+  <!-- ===================== LANÇAMENTO MANUAL ===================== -->
+  <div class="card">
+    <div class="section-title">Lançamentos manuais (importação Domínio)</div>
+    <div class="help">Digite um lançamento por vez (ex.: custa paga, reembolso, repasse) e baixe o <b>lanctos.txt</b> no layout "Lançamentos" do Domínio. Os lançamentos ficam guardados neste navegador até você limpar a lista.</div>
+    <div class="field-row">
+      <div class="field"><label class="lbl">Data</label><input class="cell-input" id="manData" placeholder="dd/mm/aaaa"></div>
+      <div class="field"><label class="lbl">Conta débito</label><input class="cell-input" id="manDeb"></div>
+      <div class="field"><label class="lbl">Conta crédito</label><input class="cell-input" id="manCred"></div>
+      <div class="field"><label class="lbl">Valor</label><input class="cell-input num" id="manValor" placeholder="0,00"></div>
+      <div class="field"><label class="lbl">Cód. Hist. (opcional)</label><input class="cell-input" id="manCodHist"></div>
+      <div class="field"><label class="lbl">Código Emp. (Domínio)</label><input class="cell-input" id="manCodEmp" value="330"></div>
+    </div>
+    <div class="field-row"><div class="field"><label class="lbl">Complemento do histórico</label><input class="cell-input wide" id="manHist"></div></div>
+    <div class="btn-row">
+      <button class="btn" onclick="addLancManual()">Adicionar lançamento</button>
+      <button class="btn ghost" onclick="downloadLancManualTxt()">Baixar lanctos.txt</button>
+      <button class="btn ghost" onclick="downloadLancManualXlsx()">Baixar xlsx de conferência</button>
+      <button class="btn ghost" onclick="limparLancManual()">Limpar lista</button>
+    </div>
+    <div id="manStatus" class="status-line hidden"></div>
+    <div class="table-wrap"><table class="preview">
+      <thead><tr><th>Data</th><th>Débito</th><th>Crédito</th><th>Valor</th><th>Cód. Hist.</th><th>Complemento</th><th></th></tr></thead>
+      <tbody id="manBody"></tbody>
     </table></div>
   </div>
 
@@ -300,15 +328,16 @@ async function parseExtratoSicoob(file){
   const anoRef = pm ? parseInt(pm[2].slice(-4)) : (new Date()).getFullYear();
   const mesFim = pm ? parseInt(pm[2].slice(3,5)) : 12;
 
-  const movimentos = [];
+  const movimentos = [], rdc = [];
   let atual = null, parou = false;
+  const guardaRdc = a=>{ if(a && a._ignorar && /^(RDC AUTOM|RESGATE RDC)/.test(normalizeText(a.historico))) rdc.push({data:a.data, historico:a.historico, detalhe:"", valor:a.valor, direcao:a.direcao}); };
   allLines.forEach(rawLine=>{
     const line = rawLine.trim();
     if(!line || parou) return;
     if(PARAR_EM.some(p=> line.toUpperCase().startsWith(p))){ parou = true; return; }
     const em = line.match(ENTRY_RE);
     if(em){
-      if(atual && !atual._ignorar) movimentos.push(atual);
+      if(atual && !atual._ignorar) movimentos.push(atual); else guardaRdc(atual);
       const [, diaMes, historico, valorS, sinal] = em;
       if(sinal==="*"){ atual = null; return; }
       const [dd,mm] = diaMes.split("/").map(Number);
@@ -326,7 +355,8 @@ async function parseExtratoSicoob(file){
     }
     if(atual && !/^DATA HIST/i.test(line)) atual.detalheLinhas.push(line);
   });
-  if(atual && !atual._ignorar) movimentos.push(atual);
+  if(atual && !atual._ignorar) movimentos.push(atual); else guardaRdc(atual);
+  movimentos.rdc = rdc;
   movimentos.forEach(m=>{ m.detalhe = m.detalheLinhas.join(" | "); delete m.detalheLinhas; delete m._ignorar; });
   return movimentos;
 }
@@ -516,6 +546,9 @@ function processarExtrato(){
   });
 
   lastResult = {baixaEntradas, baixaServicos, cruzamentos, ambiguos, novos};
+  // O que a baixa de nota fiscal não cobriu vira lançamento contábil (padrões cadastrados
+  // preenchem a contrapartida; o resto fica em branco pra completar/cadastrar padrão).
+  lancExtrato = montarLancExtrato(sobra).concat(montarLancRdc(extratoMovs.rdc||[])).sort((a,b)=>partsToDate(a.mov.data)-partsToDate(b.mov.data));
   renderResult();
 }
 
@@ -677,7 +710,9 @@ function renderResult(){
     <div id="gravarStatus" class="status-line hidden"></div>`;
   }
 
-  box.innerHTML = html || '<div class="help">Nenhum lançamento pendente de revisão — tudo o que não foi baixado por nota fiscal já tinha pendência resolvida.</div>';
+  html += `<div id="lancExtratoBox"></div>`;
+  box.innerHTML = html;
+  renderLancExtrato();
 }
 
 async function gravarPendencias(){
@@ -720,6 +755,214 @@ function renderPendenciasAbertas(){
     return `<tr><td>${p.tipo}</td><td>${p.direcao}</td><td>${fmtDateBR(p.data)}</td><td class="num">${fmtBRL(p.valor)}</td><td>${p.descricao}</td><td class="num">${dias}</td></tr>`;
   }).join("") || '<tr><td colspan="6" style="color:var(--ink-soft);">Nenhuma pendência em aberto.</td></tr>';
 }
+/* =========================================================================
+   LANÇAMENTOS MANUAIS — layout "Lançamentos" do Domínio (mesmo da Bari/Cibele)
+   ========================================================================= */
+const LANC_HEADER = ["Data","Débito","Crédito","Valor","Cód. Hist.","Complemento Histórico","Inicia Lote","Código Emp.","Centro de Custo Débito","Centro de Custo Crédito"];
+const LANC_LS = "dario_lanc_manuais_v1";
+var lancManuais = [];
+try{ lancManuais = JSON.parse(localStorage.getItem(LANC_LS)||"[]"); }catch(e){ lancManuais = []; }
+function saveLancManuais(){ try{ localStorage.setItem(LANC_LS, JSON.stringify(lancManuais)); }catch(e){} }
+function stripAccents(s){ return String(s??"").normalize("NFD").replace(/[̀-ͯ]/g,""); }
+function downloadTextAnsi(filename, content){
+  const bytes = new Uint8Array(content.length);
+  for(let i=0;i<content.length;i++){ const c=content.charCodeAt(i); bytes[i] = c<=0xFF ? c : 0x3F; }
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([bytes],{type:"text/plain"})); a.download = filename;
+  document.body.appendChild(a); a.click(); a.remove();
+}
+function manStatus(msg, cls){ const el=document.getElementById("manStatus"); el.className="status-line"+(cls?" "+cls:""); el.textContent=msg; }
+function renderLancManuais(){
+  const body = document.getElementById("manBody");
+  body.innerHTML = lancManuais.map((r,i)=>`<tr><td>${r.data}</td><td>${r.debito}</td><td>${r.credito}</td><td class="num">${fmtBRL(r.valor)}</td><td>${r.codHist||""}</td><td>${r.hist||""}</td><td><button class="btn ghost small" onclick="removeLancManual(${i})">remover</button></td></tr>`).join("")
+    || '<tr><td colspan="7" style="color:var(--ink-soft);">Nenhum lançamento manual na lista.</td></tr>';
+}
+function addLancManual(){
+  const g = id=>document.getElementById(id).value.trim();
+  const data = brDateToParts(g("manData")), valor = parseBRL(g("manValor"));
+  const debito = g("manDeb"), credito = g("manCred");
+  if(!data){ manStatus("Data inválida (use dd/mm/aaaa).","err"); return; }
+  if(!debito || !credito){ manStatus("Informe a conta de débito e a de crédito.","err"); return; }
+  if(valor==null || valor<=0){ manStatus("Valor inválido.","err"); return; }
+  lancManuais.push({data:fmtDateBR(data), debito, credito, valor, codHist:g("manCodHist"), hist:g("manHist"), codEmp:g("manCodEmp")});
+  saveLancManuais(); renderLancManuais();
+  ["manDeb","manCred","manValor","manCodHist","manHist"].forEach(id=>document.getElementById(id).value="");
+  manStatus(`Lançamento adicionado (${lancManuais.length} na lista).`,"ok");
+}
+function removeLancManual(i){ lancManuais.splice(i,1); saveLancManuais(); renderLancManuais(); }
+function limparLancManual(){ if(lancManuais.length && !confirm("Apagar todos os lançamentos manuais da lista?")) return; lancManuais=[]; saveLancManuais(); renderLancManuais(); }
+function lancManRow(r){ return [r.data, r.debito, r.credito, r.valor, r.codHist||"", r.hist||"", 1, r.codEmp||"", "", ""]; }
+function downloadLancManualTxt(){
+  if(!lancManuais.length){ manStatus("Nenhum lançamento na lista.","err"); return; }
+  const lines = lancManuais.map(r=> lancManRow(r).map((v,i)=> i===3 ? fmtValorTxt(v) : (i===5 ? stripAccents(v) : v)).join(";"));
+  downloadTextAnsi("lanctos.txt", lines.join("\r\n")+"\r\n");
+}
+function downloadLancManualXlsx(){
+  if(!lancManuais.length){ manStatus("Nenhum lançamento na lista.","err"); return; }
+  downloadXlsx("lancamentos_manuais.xlsx", [LANC_HEADER, ...lancManuais.map(lancManRow)], "Lancamentos");
+}
+renderLancManuais();
+
+/* =========================================================================
+   LANÇAMENTOS DO EXTRATO — 1º baixa de nota fiscal (entradas/serviços), 2º o que
+   sobrou vira lançamento. Padrões (palavra-chave -> conta de contrapartida) são
+   cadastrados uma vez e reconhecidos nos meses seguintes. Conta do banco é digitada
+   pelo usuário (nunca presumida).
+   ========================================================================= */
+const PADROES_LS = "dario_padroes_lanc_v1", BANCO_LS = "dario_conta_banco_v1", APLIC_LS = "dario_conta_aplic_v1", CODEMP_LS = "dario_cod_emp_v1";
+var padroesLanc = [], lancExtrato = [];
+try{ padroesLanc = JSON.parse(localStorage.getItem(PADROES_LS)||"[]"); }catch(e){ padroesLanc = []; }
+function lsGet(k){ try{ return localStorage.getItem(k)||""; }catch(e){ return ""; } }
+function lsSet(k,v){ try{ localStorage.setItem(k,v); }catch(e){} }
+function savePadroes(){ lsSet(PADROES_LS, JSON.stringify(padroesLanc)); }
+function escHtml(s){ return String(s??"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
+
+const DETALHE_GENERICO = /^(pagamento pix|recebimento pix|transfer[eê]ncia pix|doc\.?:|internet$|telefone$)/i;
+function detalheUtil(mov){
+  return (mov.detalhe||"").split(" | ").map(s=>s.trim()).filter(s=>s && !DETALHE_GENERICO.test(s));
+}
+function histPadrao(mov){
+  const partes = [mov.historico, ...detalheUtil(mov)].join(" - ");
+  return partes.length>180 ? partes.slice(0,180) : partes;
+}
+function acharPadrao(mov){
+  const texto = normalizeText(`${mov.historico} ${mov.detalhe}`);
+  for(let i=0;i<padroesLanc.length;i++){
+    const p = padroesLanc[i];
+    if(p.direcao && p.direcao!==(mov.direcao==="pago"?"pago":"recebido")) continue;
+    if(p.keywords.some(k=> k && texto.includes(normalizeText(k)))) return i;
+  }
+  return -1;
+}
+function contaBanco(){ return lsGet(BANCO_LS) || "7"; }
+function contaAplic(){ return lsGet(APLIC_LS) || "9"; }
+function codEmpresa(){ return lsGet(CODEMP_LS) || "330"; }
+// RDC automático (aplicação) e resgate: movimento entre banco e aplicação, sem padrão.
+function montarLancRdc(rdc){
+  return rdc.map(mov=>{
+    const aplic = mov.direcao==="pago";   // RDC AUTOMÁTICO debita o banco = aplicou
+    return {mov, fixo:true, manual:false, padrao:-1, incluir:true,
+      debito: aplic ? contaAplic() : contaBanco(), credito: aplic ? contaBanco() : contaAplic(),
+      hist: aplic ? "APLICACAO FINANCEIRA RDC" : "RESGATE APLICACAO FINANCEIRA RDC"};
+  });
+}
+function aplicarContas(r){
+  if(r.fixo) return;
+  const banco = (document.getElementById("lancBanco")||{}).value?.trim() || contaBanco();
+  const pi = r.manual ? -1 : acharPadrao(r.mov);
+  r.padrao = pi;
+  if(!r.manual){
+    const p = pi>=0 ? padroesLanc[pi] : null;
+    const contra = p && !p.ignorar ? (p.conta||"") : "";
+    if(r.mov.direcao==="pago"){ r.credito = banco; r.debito = contra; }
+    else { r.debito = banco; r.credito = contra; }
+    r.hist = (p && p.hist) ? p.hist : histPadrao(r.mov);
+    r.incluir = !!(r.debito && r.credito) && !(p && p.ignorar);
+    r.ignorado = !!(p && p.ignorar);
+  }
+}
+function montarLancExtrato(sobra){
+  return sobra.map(({mov})=>{ const r = {mov, manual:false}; aplicarContas(r); return r; })
+    .sort((a,b)=>partsToDate(a.mov.data)-partsToDate(b.mov.data));
+}
+function reaplicarPadroes(){ lancExtrato.forEach(aplicarContas); renderLancExtrato(); }
+function setLancCampo(i, campo, val){
+  const r = lancExtrato[i];
+  if(campo==="incluir"){ r.incluir = !!val; return; }
+  r.manual = true;
+  if(campo==="debito"||campo==="credito") r[campo] = String(val).trim();
+  else r.hist = val;
+  r.incluir = !!(r.debito && r.credito);
+  renderLancExtrato();
+}
+function cadastrarPadraoDe(i){
+  const r = lancExtrato[i], m = r.mov;
+  const sug = detalheUtil(m)[0] || m.historico;
+  const kw = prompt("Palavra-chave que identifica esse tipo de lançamento (nome, CNPJ ou trecho do histórico).\nSepare várias por | :", sug);
+  if(!kw || !kw.trim()) return;
+  const lado = m.direcao==="pago" ? "débito" : "crédito";
+  const conta = prompt(`Conta contábil da contrapartida (${lado}) pra "${kw.trim()}". Deixe vazio e OK pra IGNORAR esse tipo de linha:`, r.manual ? (m.direcao==="pago"?r.debito:r.credito) : "");
+  if(conta===null) return;
+  const hist = prompt("Histórico fixo (deixe vazio pra usar o texto do extrato):", "");
+  if(hist===null) return;
+  const soEssaDirecao = confirm(`Valer só para ${m.direcao==="pago"?"saídas (pagos)":"entradas (recebidos)"}?\nOK = só esta direção · Cancelar = qualquer direção`);
+  padroesLanc.push({keywords: kw.split("|").map(s=>s.trim()).filter(Boolean), direcao: soEssaDirecao?m.direcao:"", conta: conta.trim(), hist: hist.trim(), ignorar: !conta.trim()});
+  savePadroes();
+  lancExtrato.forEach(x=>{ x.manual = false; });  // reaplica em todas
+  reaplicarPadroes();
+}
+function removerPadrao(i){ if(!confirm("Remover este padrão?")) return; padroesLanc.splice(i,1); savePadroes(); lancExtrato.forEach(x=>{x.manual=false;}); reaplicarPadroes(); }
+function editarPadrao(i, campo, val){
+  const p = padroesLanc[i];
+  if(campo==="keywords") p.keywords = val.split("|").map(s=>s.trim()).filter(Boolean);
+  else if(campo==="ignorar") p.ignorar = !!val;
+  else p[campo] = val.trim();
+  savePadroes();
+}
+function lancExtratoRowArray(r){
+  return [fmtDateBR(r.mov.data), r.debito, r.credito, r.mov.valor, "", r.hist||"", 1, codEmpresa(), "", ""];
+}
+function baixarLancExtratoTxt(){
+  const sel = lancExtrato.filter(r=>r.incluir);
+  const faltando = sel.filter(r=>!r.debito || !r.credito);
+  if(faltando.length){ alert(`${faltando.length} linha(s) marcada(s) estão sem conta de débito ou crédito. Complete ou desmarque.`); return; }
+  const rows = [...sel.map(lancExtratoRowArray), ...lancManuais.map(lancManRow)];
+  if(!rows.length){ alert("Nenhum lançamento marcado pra incluir."); return; }
+  const lines = rows.map(a=> a.map((v,i)=> i===3 ? fmtValorTxt(v) : (i===5 ? stripAccents(v) : v)).join(";"));
+  downloadTextAnsi("lanctos.txt", lines.join("\r\n")+"\r\n");
+}
+function baixarLancExtratoXlsx(){
+  const sel = lancExtrato.filter(r=>r.incluir);
+  downloadXlsx("lancamentos_extrato.xlsx", [LANC_HEADER, ...sel.map(lancExtratoRowArray), ...lancManuais.map(lancManRow)], "Lancamentos");
+}
+function renderLancExtrato(){
+  const box = document.getElementById("lancExtratoBox"); if(!box) return;
+  const banco = contaBanco(), aplic = contaAplic(), codEmp = codEmpresa();
+  const pend = lancExtrato.filter(r=>!r.ignorado && (!r.debito || !r.credito)).length;
+  const inc = lancExtrato.filter(r=>r.incluir).length;
+  let h = `<div class="section-title mt">Lançamentos contábeis do extrato (o que a baixa de nota fiscal não cobriu)</div>
+  <div class="help">Primeiro a ferramenta faz as baixas de entradas/serviços; o que sobrou do extrato aparece aqui. Linhas que casam com um <b>padrão</b> já vêm com a contrapartida preenchida; as amarelas faltam conta — digite a conta na linha ou clique em <b>+ padrão</b> pra cadastrar e reconhecer sozinho nos próximos meses. Saídas creditam o banco; entradas debitam o banco.</div>
+  <div class="field-row">
+    <div class="field"><label class="lbl">Conta contábil do banco (SICOOB)</label><input class="cell-input" id="lancBanco" value="${escHtml(banco)}" onchange="lsSet(BANCO_LS,this.value.trim());lancExtrato.filter(r=>r.fixo).forEach(r=>{const a=r.mov.direcao==='pago';r.debito=a?contaAplic():contaBanco();r.credito=a?contaBanco():contaAplic();});reaplicarPadroes()"></div>
+    <div class="field"><label class="lbl">Conta contábil da aplicação (RDC)</label><input class="cell-input" id="lancAplic" value="${escHtml(aplic)}" onchange="lsSet(APLIC_LS,this.value.trim());lancExtrato.filter(r=>r.fixo).forEach(r=>{const a=r.mov.direcao==='pago';r.debito=a?contaAplic():contaBanco();r.credito=a?contaBanco():contaAplic();});renderLancExtrato()"></div>
+    <div class="field"><label class="lbl">Código Emp. (Domínio)</label><input class="cell-input" id="lancCodEmp" value="${escHtml(codEmp)}" onchange="lsSet(CODEMP_LS,this.value.trim())"></div>
+  </div>
+  <div class="summary-row"><div class="item"><div class="k">Linhas</div><div class="v">${lancExtrato.length}</div></div><div class="item"><div class="k">Marcadas p/ exportar</div><div class="v">${inc}</div></div><div class="item"><div class="k">Faltando conta</div><div class="v">${pend}</div></div></div>
+  <div class="table-wrap"><table class="preview"><thead><tr><th>Incl.</th><th>Data</th><th>Valor</th><th>Histórico do extrato</th><th>Débito</th><th>Crédito</th><th>Histórico do lançamento</th><th>Padrão</th></tr></thead><tbody>`;
+  lancExtrato.forEach((r,i)=>{
+    const cls = r.ignorado ? "" : ((!r.debito||!r.credito) ? "warn" : "ok2");
+    const pd = r.fixo ? "RDC" : r.padrao>=0 ? `#${r.padrao+1}${r.ignorado?" (ignorar)":""}` : `<button class="btn ghost small" onclick="cadastrarPadraoDe(${i})">+ padrão</button>`;
+    h += `<tr class="${cls}">
+      <td class="cell" style="text-align:center"><input type="checkbox" ${r.incluir?"checked":""} onchange="setLancCampo(${i},'incluir',this.checked)"></td>
+      <td>${fmtDateBR(r.mov.data)}</td><td class="num">${fmtBRL(r.mov.valor)} ${r.mov.direcao==="pago"?"D":"C"}</td>
+      <td>${escHtml(r.mov.historico)} ${escHtml(detalheUtil(r.mov).join(" | "))}</td>
+      <td class="cell"><input class="cell-input" value="${escHtml(r.debito||"")}" onchange="setLancCampo(${i},'debito',this.value)"></td>
+      <td class="cell"><input class="cell-input" value="${escHtml(r.credito||"")}" onchange="setLancCampo(${i},'credito',this.value)"></td>
+      <td class="cell"><input class="cell-input wide" value="${escHtml(r.hist||"")}" onchange="setLancCampo(${i},'hist',this.value)"></td>
+      <td>${pd}</td></tr>`;
+  });
+  h += `</tbody></table></div>
+  <div class="btn-row">
+    <button class="btn" onclick="baixarLancExtratoTxt()">Baixar lanctos.txt (extrato + manuais)</button>
+    <button class="btn ghost" onclick="baixarLancExtratoXlsx()">Baixar xlsx de conferência</button>
+  </div>
+  <div class="section-title mt">Padrões cadastrados (${padroesLanc.length})</div>
+  <div class="help">Palavras-chave separadas por | — basta uma aparecer no histórico/detalhe do extrato. Conta vazia + "ignorar" = a linha não gera lançamento. Ficam salvos neste navegador.</div>
+  <div class="table-wrap"><table class="preview"><thead><tr><th>#</th><th>Palavras-chave</th><th>Direção</th><th>Conta contrapartida</th><th>Histórico fixo</th><th>Ignorar</th><th></th></tr></thead><tbody>`;
+  padroesLanc.forEach((p,i)=>{
+    h += `<tr><td>${i+1}</td>
+      <td class="cell"><input class="cell-input wide" value="${escHtml(p.keywords.join(" | "))}" onchange="editarPadrao(${i},'keywords',this.value);reaplicarPadroes()"></td>
+      <td class="cell"><select class="cell-input" onchange="editarPadrao(${i},'direcao',this.value);reaplicarPadroes()"><option value="" ${!p.direcao?"selected":""}>qualquer</option><option value="pago" ${p.direcao==="pago"?"selected":""}>saída</option><option value="recebido" ${p.direcao==="recebido"?"selected":""}>entrada</option></select></td>
+      <td class="cell"><input class="cell-input" value="${escHtml(p.conta)}" onchange="editarPadrao(${i},'conta',this.value);reaplicarPadroes()"></td>
+      <td class="cell"><input class="cell-input wide" value="${escHtml(p.hist)}" onchange="editarPadrao(${i},'hist',this.value);reaplicarPadroes()"></td>
+      <td class="cell" style="text-align:center"><input type="checkbox" ${p.ignorar?"checked":""} onchange="editarPadrao(${i},'ignorar',this.checked);reaplicarPadroes()"></td>
+      <td><button class="btn ghost small" onclick="removerPadrao(${i})">remover</button></td></tr>`;
+  });
+  if(!padroesLanc.length) h += `<tr><td colspan="7" style="color:var(--ink-soft);">Nenhum padrão cadastrado ainda.</td></tr>`;
+  h += `</tbody></table></div>`;
+  box.innerHTML = h;
+}
+
 window.renderPendenciasAbertas = renderPendenciasAbertas;
 window.renderClientesCount = renderClientesCount;
 
