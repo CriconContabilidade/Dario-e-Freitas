@@ -843,7 +843,7 @@ function montarLancRdc(rdc){
     const aplic = mov.direcao==="pago";   // RDC AUTOMÁTICO debita o banco = aplicou
     return {mov, fixo:true, manual:false, padrao:-1, incluir:true,
       debito: aplic ? contaAplic() : contaBanco(), credito: aplic ? contaBanco() : contaAplic(),
-      hist: aplic ? "APLICACAO FINANCEIRA RDC" : "RESGATE APLICACAO FINANCEIRA RDC"};
+      hist: aplic ? "VALOR REF. APLICACAO FINANCEIRA - RDC SICOOB" : "VALOR REF. RESGATE DE APLICACAO FINANCEIRA - RDC SICOOB"};
   });
 }
 function aplicarContas(r){
