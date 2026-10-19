@@ -130,32 +130,6 @@ code{background:var(--paper);padding:1px 5px;border-radius:3px;font-family:'IBM 
     </table></div>
   </div>
 
-  <!-- ===================== LANÇAMENTO MANUAL ===================== -->
-  <div class="card">
-    <div class="section-title">Lançamentos manuais (importação Domínio)</div>
-    <div class="help">Digite um lançamento por vez (ex.: custa paga, reembolso, repasse) e baixe o <b>lanctos.txt</b> no layout "Lançamentos" do Domínio. Os lançamentos ficam guardados neste navegador até você limpar a lista.</div>
-    <div class="field-row">
-      <div class="field"><label class="lbl">Data</label><input class="cell-input" id="manData" placeholder="dd/mm/aaaa"></div>
-      <div class="field"><label class="lbl">Conta débito</label><input class="cell-input" id="manDeb"></div>
-      <div class="field"><label class="lbl">Conta crédito</label><input class="cell-input" id="manCred"></div>
-      <div class="field"><label class="lbl">Valor</label><input class="cell-input num" id="manValor" placeholder="0,00"></div>
-      <div class="field"><label class="lbl">Cód. Hist. (opcional)</label><input class="cell-input" id="manCodHist"></div>
-      <div class="field"><label class="lbl">Código Emp. (Domínio)</label><input class="cell-input" id="manCodEmp" value="330"></div>
-    </div>
-    <div class="field-row"><div class="field"><label class="lbl">Complemento do histórico</label><input class="cell-input wide" id="manHist"></div></div>
-    <div class="btn-row">
-      <button class="btn" onclick="addLancManual()">Adicionar lançamento</button>
-      <button class="btn ghost" onclick="downloadLancManualTxt()">Baixar lanctos.txt</button>
-      <button class="btn ghost" onclick="downloadLancManualXlsx()">Baixar xlsx de conferência</button>
-      <button class="btn ghost" onclick="limparLancManual()">Limpar lista</button>
-    </div>
-    <div id="manStatus" class="status-line hidden"></div>
-    <div class="table-wrap"><table class="preview">
-      <thead><tr><th>Data</th><th>Débito</th><th>Crédito</th><th>Valor</th><th>Cód. Hist.</th><th>Complemento</th><th></th></tr></thead>
-      <tbody id="manBody"></tbody>
-    </table></div>
-  </div>
-
   <!-- ===================== ENTRADA ===================== -->
   <div class="card">
     <div class="section-title">1. Extrato bancário SICOOB do mês (PDF)</div>
@@ -759,10 +733,6 @@ function renderPendenciasAbertas(){
    LANÇAMENTOS MANUAIS — layout "Lançamentos" do Domínio (mesmo da Bari/Cibele)
    ========================================================================= */
 const LANC_HEADER = ["Data","Débito","Crédito","Valor","Cód. Hist.","Complemento Histórico","Inicia Lote","Código Emp.","Centro de Custo Débito","Centro de Custo Crédito"];
-const LANC_LS = "dario_lanc_manuais_v1";
-var lancManuais = [];
-try{ lancManuais = JSON.parse(localStorage.getItem(LANC_LS)||"[]"); }catch(e){ lancManuais = []; }
-function saveLancManuais(){ try{ localStorage.setItem(LANC_LS, JSON.stringify(lancManuais)); }catch(e){} }
 function stripAccents(s){ return String(s??"").normalize("NFD").replace(/[̀-ͯ]/g,""); }
 function downloadTextAnsi(filename, content){
   const bytes = new Uint8Array(content.length);
@@ -771,37 +741,6 @@ function downloadTextAnsi(filename, content){
   a.href = URL.createObjectURL(new Blob([bytes],{type:"text/plain"})); a.download = filename;
   document.body.appendChild(a); a.click(); a.remove();
 }
-function manStatus(msg, cls){ const el=document.getElementById("manStatus"); el.className="status-line"+(cls?" "+cls:""); el.textContent=msg; }
-function renderLancManuais(){
-  const body = document.getElementById("manBody");
-  body.innerHTML = lancManuais.map((r,i)=>`<tr><td>${r.data}</td><td>${r.debito}</td><td>${r.credito}</td><td class="num">${fmtBRL(r.valor)}</td><td>${r.codHist||""}</td><td>${r.hist||""}</td><td><button class="btn ghost small" onclick="removeLancManual(${i})">remover</button></td></tr>`).join("")
-    || '<tr><td colspan="7" style="color:var(--ink-soft);">Nenhum lançamento manual na lista.</td></tr>';
-}
-function addLancManual(){
-  const g = id=>document.getElementById(id).value.trim();
-  const data = brDateToParts(g("manData")), valor = parseBRL(g("manValor"));
-  const debito = g("manDeb"), credito = g("manCred");
-  if(!data){ manStatus("Data inválida (use dd/mm/aaaa).","err"); return; }
-  if(!debito || !credito){ manStatus("Informe a conta de débito e a de crédito.","err"); return; }
-  if(valor==null || valor<=0){ manStatus("Valor inválido.","err"); return; }
-  lancManuais.push({data:fmtDateBR(data), debito, credito, valor, codHist:g("manCodHist"), hist:g("manHist"), codEmp:g("manCodEmp")});
-  saveLancManuais(); renderLancManuais();
-  ["manDeb","manCred","manValor","manCodHist","manHist"].forEach(id=>document.getElementById(id).value="");
-  manStatus(`Lançamento adicionado (${lancManuais.length} na lista).`,"ok");
-}
-function removeLancManual(i){ lancManuais.splice(i,1); saveLancManuais(); renderLancManuais(); }
-function limparLancManual(){ if(lancManuais.length && !confirm("Apagar todos os lançamentos manuais da lista?")) return; lancManuais=[]; saveLancManuais(); renderLancManuais(); }
-function lancManRow(r){ return [r.data, r.debito, r.credito, r.valor, r.codHist||"", r.hist||"", 1, r.codEmp||"", "", ""]; }
-function downloadLancManualTxt(){
-  if(!lancManuais.length){ manStatus("Nenhum lançamento na lista.","err"); return; }
-  const lines = lancManuais.map(r=> lancManRow(r).map((v,i)=> i===3 ? fmtValorTxt(v) : (i===5 ? stripAccents(v) : v)).join(";"));
-  downloadTextAnsi("lanctos.txt", lines.join("\r\n")+"\r\n");
-}
-function downloadLancManualXlsx(){
-  if(!lancManuais.length){ manStatus("Nenhum lançamento na lista.","err"); return; }
-  downloadXlsx("lancamentos_manuais.xlsx", [LANC_HEADER, ...lancManuais.map(lancManRow)], "Lancamentos");
-}
-renderLancManuais();
 
 /* =========================================================================
    LANÇAMENTOS DO EXTRATO — 1º baixa de nota fiscal (entradas/serviços), 2º o que
@@ -920,14 +859,14 @@ function baixarLancExtratoTxt(){
   const sel = lancExtrato.filter(r=>r.incluir);
   const faltando = sel.filter(r=>!r.debito || !r.credito);
   if(faltando.length){ alert(`${faltando.length} linha(s) marcada(s) estão sem conta de débito ou crédito. Complete ou desmarque.`); return; }
-  const rows = [...sel.map(lancExtratoRowArray), ...lancManuais.map(lancManRow)];
+  const rows = sel.map(lancExtratoRowArray);
   if(!rows.length){ alert("Nenhum lançamento marcado pra incluir."); return; }
   const lines = rows.map(a=> a.map((v,i)=> i===3 ? fmtValorTxt(v) : (i===5 ? stripAccents(v) : v)).join(";"));
   downloadTextAnsi("lanctos.txt", lines.join("\r\n")+"\r\n");
 }
 function baixarLancExtratoXlsx(){
   const sel = lancExtrato.filter(r=>r.incluir);
-  downloadXlsx("lancamentos_extrato.xlsx", [LANC_HEADER, ...sel.map(lancExtratoRowArray), ...lancManuais.map(lancManRow)], "Lancamentos");
+  downloadXlsx("lancamentos_extrato.xlsx", [LANC_HEADER, ...sel.map(lancExtratoRowArray)], "Lancamentos");
 }
 function renderLancExtrato(){
   const box = document.getElementById("lancExtratoBox"); if(!box) return;
@@ -958,7 +897,7 @@ function renderLancExtrato(){
   });
   h += `</tbody></table></div>
   <div class="btn-row">
-    <button class="btn" onclick="baixarLancExtratoTxt()">Baixar lanctos.txt (extrato + manuais)</button>
+    <button class="btn" onclick="baixarLancExtratoTxt()">Baixar lanctos.txt</button>
     <button class="btn ghost" onclick="baixarLancExtratoXlsx()">Baixar xlsx de conferência</button>
   </div>
   <div class="section-title mt">Padrões cadastrados (${padroesLanc.length})</div>
