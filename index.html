@@ -868,12 +868,26 @@ function montarLancExtrato(sobra){
 function reaplicarPadroes(){ lancExtrato.forEach(aplicarContas); renderLancExtrato(); }
 function setLancCampo(i, campo, val){
   const r = lancExtrato[i];
-  if(campo==="incluir"){ r.incluir = !!val; return; }
+  if(campo==="incluir"){ r.incluir = !!val; atualizarResumoLanc(); return; }
   r.manual = true;
   if(campo==="debito"||campo==="credito") r[campo] = String(val).trim();
   else r.hist = val;
   r.incluir = !!(r.debito && r.credito);
-  renderLancExtrato();
+  atualizarLinhaLanc(i);   // só atualiza a linha: re-renderizar tudo jogava a tela de volta pro início
+}
+function atualizarLinhaLanc(i){
+  const r = lancExtrato[i], tr = document.getElementById("lrow"+i);
+  if(tr){
+    tr.className = r.ignorado ? "" : ((!r.debito||!r.credito) ? "warn" : "ok2");
+    const cb = tr.querySelector('input[type=checkbox]'); if(cb) cb.checked = !!r.incluir;
+  }
+  atualizarResumoLanc();
+}
+function atualizarResumoLanc(){
+  const set=(id,v)=>{ const el=document.getElementById(id); if(el) el.textContent=v; };
+  set("lancResTotal", lancExtrato.length);
+  set("lancResInc", lancExtrato.filter(r=>r.incluir).length);
+  set("lancResPend", lancExtrato.filter(r=>!r.ignorado && (!r.debito || !r.credito)).length);
 }
 function cadastrarPadraoDe(i){
   const r = lancExtrato[i], m = r.mov;
@@ -917,6 +931,7 @@ function baixarLancExtratoXlsx(){
 }
 function renderLancExtrato(){
   const box = document.getElementById("lancExtratoBox"); if(!box) return;
+  const scrollY = window.scrollY, wraps = [...box.querySelectorAll(".table-wrap")].map(w=>[w.scrollTop,w.scrollLeft]);
   const banco = contaBanco(), aplic = contaAplic(), codEmp = codEmpresa();
   const pend = lancExtrato.filter(r=>!r.ignorado && (!r.debito || !r.credito)).length;
   const inc = lancExtrato.filter(r=>r.incluir).length;
@@ -927,12 +942,12 @@ function renderLancExtrato(){
     <div class="field"><label class="lbl">Conta contábil da aplicação (RDC)</label><input class="cell-input" id="lancAplic" value="${escHtml(aplic)}" onchange="lsSet(APLIC_LS,this.value.trim());lancExtrato.filter(r=>r.fixo).forEach(r=>{const a=r.mov.direcao==='pago';r.debito=a?contaAplic():contaBanco();r.credito=a?contaBanco():contaAplic();});renderLancExtrato()"></div>
     <div class="field"><label class="lbl">Código Emp. (Domínio)</label><input class="cell-input" id="lancCodEmp" value="${escHtml(codEmp)}" onchange="lsSet(CODEMP_LS,this.value.trim())"></div>
   </div>
-  <div class="summary-row"><div class="item"><div class="k">Linhas</div><div class="v">${lancExtrato.length}</div></div><div class="item"><div class="k">Marcadas p/ exportar</div><div class="v">${inc}</div></div><div class="item"><div class="k">Faltando conta</div><div class="v">${pend}</div></div></div>
+  <div class="summary-row"><div class="item"><div class="k">Linhas</div><div class="v" id="lancResTotal">${lancExtrato.length}</div></div><div class="item"><div class="k">Marcadas p/ exportar</div><div class="v" id="lancResInc">${inc}</div></div><div class="item"><div class="k">Faltando conta</div><div class="v" id="lancResPend">${pend}</div></div></div>
   <div class="table-wrap"><table class="preview"><thead><tr><th>Incl.</th><th>Data</th><th>Valor</th><th>Histórico do extrato</th><th>Débito</th><th>Crédito</th><th>Histórico do lançamento</th><th>Padrão</th></tr></thead><tbody>`;
   lancExtrato.forEach((r,i)=>{
     const cls = r.ignorado ? "" : ((!r.debito||!r.credito) ? "warn" : "ok2");
     const pd = r.fixo ? "RDC" : r.padrao>=0 ? `#${r.padrao+1}${r.ignorado?" (ignorar)":""}` : `<button class="btn ghost small" onclick="cadastrarPadraoDe(${i})">+ padrão</button>`;
-    h += `<tr class="${cls}">
+    h += `<tr id="lrow${i}" class="${cls}">
       <td class="cell" style="text-align:center"><input type="checkbox" ${r.incluir?"checked":""} onchange="setLancCampo(${i},'incluir',this.checked)"></td>
       <td>${fmtDateBR(r.mov.data)}</td><td class="num">${fmtBRL(r.mov.valor)} ${r.mov.direcao==="pago"?"D":"C"}</td>
       <td>${escHtml(r.mov.historico)} ${escHtml(detalheUtil(r.mov).join(" | "))}</td>
@@ -961,6 +976,8 @@ function renderLancExtrato(){
   if(!padroesLanc.length) h += `<tr><td colspan="7" style="color:var(--ink-soft);">Nenhum padrão cadastrado ainda.</td></tr>`;
   h += `</tbody></table></div>`;
   box.innerHTML = h;
+  [...box.querySelectorAll(".table-wrap")].forEach((w,k)=>{ if(wraps[k]){ w.scrollTop=wraps[k][0]; w.scrollLeft=wraps[k][1]; } });
+  window.scrollTo(0, scrollY);
 }
 
 window.renderPendenciasAbertas = renderPendenciasAbertas;
