@@ -873,14 +873,13 @@ function cadastrarPadraoDe(i){
     padroesLanc.push({keywords:kws, direcao:document.getElementById("padDir").value, conta, hist:document.getElementById("padHist").value.trim(), ignorar:ign});
     savePadroes();
     fechar();
-    lancExtrato.forEach(x=>{ x.manual = false; });
     reaplicarPadroes();
     const casadas = lancExtrato.filter(x=>x.padrao===padroesLanc.length-1).length;
     alert(`Padrão salvo (${padroesLanc.length} no total). Aplicado em ${casadas} linha(s) deste extrato.`);
   };
   document.getElementById("padKw").focus();
 }
-function removerPadrao(i){ if(!confirm("Remover este padrão?")) return; padroesLanc.splice(i,1); savePadroes(); lancExtrato.forEach(x=>{x.manual=false;}); reaplicarPadroes(); }
+function removerPadrao(i){ if(!confirm("Remover este padrão?")) return; padroesLanc.splice(i,1); savePadroes(); reaplicarPadroes(); }
 function editarPadrao(i, campo, val){
   const p = padroesLanc[i];
   if(campo==="keywords") p.keywords = val.split("|").map(s=>s.trim()).filter(Boolean);
